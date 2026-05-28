@@ -1,0 +1,1722 @@
+[
+    {
+        "id": "b7882dd88658c0f6",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "0a8c2bef0d49c7b6",
+        "type": "inject",
+        "z": "b7882dd88658c0f6",
+        "name": "Test Bottle Event",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{   \"school_id\": \"SCH_003\",   \"school_name\": \"St Declans College\",   \"bin_id\": \"BIN_A\",   \"bin_name\": \"Main Hall Bin\",   \"barcode\": \"5391234567890\" }",
+        "payloadType": "json",
+        "x": 580,
+        "y": 1080,
+        "wires": [
+            [
+                "02a0020df84fb4b2"
+            ]
+        ]
+    },
+    {
+        "id": "02a0020df84fb4b2",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Barcode Lookup",
+        "func": "let event = msg.payload;\n\n// Parse if it's a string\nif (typeof event === \"string\") {\n    try {\n        event = JSON.parse(event);\n    } catch (e) {\n        node.warn(\"Could not parse payload as JSON\");\n        return null;\n    }\n}\n\nif (typeof event !== \"object\" || event === null) {\n    node.warn(\"Payload is not a JSON object\");\n    return null;\n}\n\nlet barcodeDB = {\n    \"5391234567890\": {\n        name: \"Water Bottle 500ml\",\n        container_type: \"plastic_bottle\",\n        size_ml: 500,\n        deposit_value: 0.15\n    },\n    \"5391234567000\": {\n        name: \"Soft Drink 1L\",\n        container_type: \"plastic_bottle\",\n        size_ml: 1000,\n        deposit_value: 0.25\n    },\n    \"5399999999999\": {\n        name: \"Can 330ml\",\n        container_type: \"can\",\n        size_ml: 330,\n        deposit_value: 0.15\n    },\n    \"5000112627084\": {\n        name: \"Test Product\",\n        container_type: \"bottle\",\n        size_ml: 500,\n        deposit_value: 0.15\n    }\n};\n\nif (!event.barcode) {\n    node.warn(\"No barcode supplied\");\n    return null;\n}\n\nlet item = barcodeDB[event.barcode];\n\nif (!item) {\n    node.warn(\"Unknown barcode: \" + event.barcode);\n    return null;\n}\n\nevent.container_type = item.container_type;\nevent.size_ml = item.size_ml;\nevent.deposit_value = item.deposit_value;\nevent.item_name = item.name;\nevent.count = event.count || 1;\nevent.timestamp = event.timestamp || new Date().toISOString();\n\nmsg.payload = event;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 940,
+        "y": 1160,
+        "wires": [
+            [
+                "a67c9aaeb4ccac24",
+                "7a4519fc36de36d0"
+            ]
+        ]
+    },
+    {
+        "id": "fffb6ee969cb4652",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "Recycling Event",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 1350,
+        "y": 1180,
+        "wires": []
+    },
+    {
+        "id": "a67c9aaeb4ccac24",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Process Recycling Event",
+        "func": "let data = flow.get(\"leaderboardData\") || { schools: {} };\nlet event = msg.payload;\n\nif (typeof event === \"string\") {\n    event = JSON.parse(event);\n}\n\nlet schoolId = event.school_id || event.classId || \"UNKNOWN\";\nlet schoolName = event.school_name || event.classId || \"Unnamed School\";\nlet binId = event.bin_id || schoolId + \"_bin\";\nlet binName = event.bin_name || \"Default Bin\";\nlet depositValue = event.deposit_value || 0.15;\nlet count = event.count || 1;\nlet timestamp = event.timestamp || new Date().toISOString();\nlet county = event.county || \"School\";\n\nnode.warn(\"Processing \" + event.item_name + \" for \" + schoolName);\n\nlet recentEvents = flow.get(\"recentEvents\") || {};\nlet eventKey = schoolId + \"_\" + binId + \"_\" + event.barcode + \"_\" + depositValue;\nlet nowMs = Date.now();\n\nif (recentEvents[eventKey] && (nowMs - recentEvents[eventKey] < 3000)) {\n    return null;\n}\n\nrecentEvents[eventKey] = nowMs;\nflow.set(\"recentEvents\", recentEvents);\n\nif (!data.schools[schoolId]) {\n    data.schools[schoolId] = {\n        school_id: schoolId,\n        school_name: schoolName,\n        county: county,\n        total_value: 0,\n        total_items: 0,\n        count_15c: 0,\n        count_25c: 0,\n        bins: {}\n    };\n}\n\nlet school = data.schools[schoolId];\nschool.school_name = schoolName;\nschool.county = county;\n\nif (!school.bins[binId]) {\n    school.bins[binId] = {\n        bin_id: binId,\n        bin_name: binName,\n        total_value: 0,\n        total_items: 0,\n        count_15c: 0,\n        count_25c: 0,\n        last_updated: null\n    };\n}\n\nlet bin = school.bins[binId];\nbin.bin_name = binName;\n\nlet addedValue = depositValue * count;\nbin.total_value += addedValue;\nbin.total_items += count;\nbin.last_updated = timestamp;\n\nif (depositValue === 0.15) {\n    bin.count_15c += count;\n} else {\n    bin.count_25c += count;\n}\n\nschool.total_value += addedValue;\nschool.total_items += count;\n\nif (depositValue === 0.15) {\n    school.count_15c += count;\n} else {\n    school.count_25c += count;\n}\n\nflow.set(\"leaderboardData\", data);\n\nmsg.payload = {\n    message: \"Recycling event processed\",\n    event: event,\n    updated_bin: bin,\n    updated_school: {\n        school_id: school.school_id,\n        school_name: school.school_name,\n        county: school.county,\n        total_value: school.total_value,\n        total_items: school.total_items,\n        count_15c: school.count_15c,\n        count_25c: school.count_25c\n    }\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1090,
+        "y": 1300,
+        "wires": [
+            [
+                "fffb6ee969cb4652",
+                "338de7e6c40ef131",
+                "eb750906fade5809",
+                "61c2c79ee4694335"
+            ]
+        ]
+    },
+    {
+        "id": "c951b4197289dced",
+        "type": "inject",
+        "z": "b7882dd88658c0f6",
+        "name": "Test Bottle Event 2",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{   \"school_id\": \"SCH_001\",   \"school_name\": \"St Brendans College\",   \"bin_id\": \"BIN_B\",   \"bin_name\": \"Canteen Bin\",   \"barcode\": \"5391234567000\" }",
+        "payloadType": "json",
+        "x": 590,
+        "y": 1140,
+        "wires": [
+            [
+                "02a0020df84fb4b2"
+            ]
+        ]
+    },
+    {
+        "id": "d72ab6fba8e89e29",
+        "type": "inject",
+        "z": "b7882dd88658c0f6",
+        "name": "Test Bottle Event 3",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{   \"school_id\": \"SCH_002\",   \"school_name\": \"Coláiste Mhuire\",   \"bin_id\": \"BIN_A\",   \"bin_name\": \"Front Entrance Bin\",   \"barcode\": \"5399999999999\" }",
+        "payloadType": "json",
+        "x": 610,
+        "y": 1200,
+        "wires": [
+            [
+                "02a0020df84fb4b2"
+            ]
+        ]
+    },
+    {
+        "id": "5220700743408b28",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Get Leaderboards",
+        "func": "let data = flow.get(\"leaderboardData\") || { schools: {} };\n\nlet schoolLeaderboard = [];\nlet binLeaderboard = [];\n\nfor (let schoolId in data.schools) {\n    let school = data.schools[schoolId];\n    let binCount = Object.keys(school.bins).length;\n\n    schoolLeaderboard.push({\n        school_id: school.school_id,\n        school_name: school.school_name,\n        total_value: Number(school.total_value.toFixed(2)),\n        total_items: school.total_items,\n        count_15c: school.count_15c,\n        count_25c: school.count_25c,\n        bin_count: binCount,\n        average_per_bin: binCount > 0 ? Number((school.total_value / binCount).toFixed(2)) : 0\n    });\n\n    for (let binId in school.bins) {\n        let bin = school.bins[binId];\n        binLeaderboard.push({\n            school_id: school.school_id,\n            school_name: school.school_name,\n            bin_id: bin.bin_id,\n            bin_name: bin.bin_name,\n            total_value: Number(bin.total_value.toFixed(2)),\n            total_items: bin.total_items,\n            count_15c: bin.count_15c,\n            count_25c: bin.count_25c,\n            last_updated: bin.last_updated\n        });\n    }\n}\n\nschoolLeaderboard.sort((a, b) => b.total_value - a.total_value);\nbinLeaderboard.sort((a, b) => b.total_value - a.total_value);\n\nschoolLeaderboard = schoolLeaderboard.map((item, index) => ({\n    rank: index + 1,\n    ...item\n}));\n\nbinLeaderboard = binLeaderboard.map((item, index) => ({\n    rank: index + 1,\n    ...item\n}));\n\nlet totalNationwideValue = schoolLeaderboard.reduce((sum, s) => sum + s.total_value, 0);\nlet totalNationwideItems = schoolLeaderboard.reduce((sum, s) => sum + s.total_items, 0);\n\nmsg.payload = {\n    summary: {\n        total_schools: schoolLeaderboard.length,\n        total_bins: binLeaderboard.length,\n        total_nationwide_value: Number(totalNationwideValue.toFixed(2)),\n        total_nationwide_items: totalNationwideItems\n    },\n    school_leaderboard: schoolLeaderboard,\n    bin_leaderboard: binLeaderboard\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1010,
+        "y": 1480,
+        "wires": [
+            [
+                "ebe4bc902d1eeb15"
+            ]
+        ]
+    },
+    {
+        "id": "ebe4bc902d1eeb15",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "Leaderboard",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 1240,
+        "y": 1480,
+        "wires": []
+    },
+    {
+        "id": "338de7e6c40ef131",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Build RawEvents Row",
+        "func": "let event = msg.payload.event;\n\nif (!event) {\n    return null;\n}\n\nconst outputArray = [\n    event.timestamp || new Date().toISOString(),\n    event.school_id || \"\",\n    event.school_name || \"\",\n    event.bin_id || \"\",\n    event.bin_name || \"\",\n    event.barcode || \"\",\n    event.item_name || \"\",\n    event.container_type || \"\",\n    event.size_ml || \"\",\n    event.deposit_value || 0,\n    event.count || 1,\n    event.county || \"\"\n];\n\nmsg.payload = outputArray;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1420,
+        "y": 1300,
+        "wires": [
+            [
+                "6b8944e5f67a73ef",
+                "45bf9c0097d68603"
+            ]
+        ]
+    },
+    {
+        "id": "eb750906fade5809",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Get Leaderboards Array",
+        "func": "let data = flow.get(\"leaderboardData\") || { schools: {} };\n\nlet schoolsArray = Object.values(data.schools);\n\n// sort by total bin value\nschoolsArray.sort((a, b) => {\n    let aTotal = Object.values(a.bins).reduce((sum, bin) => sum + (bin.total_value || 0), 0);\n    let bTotal = Object.values(b.bins).reduce((sum, bin) => sum + (bin.total_value || 0), 0);\n    return bTotal - aTotal;\n});\n\nmsg.payload = schoolsArray\n    .map(s => s.school_name)\n    .filter(name => name && name.trim() !== \"\")\n    .join(\",\");\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1170,
+        "y": 1420,
+        "wires": [
+            [
+                "4ca31e2ace393a8a",
+                "9fef45b111c92fa5"
+            ]
+        ]
+    },
+    {
+        "id": "4ca31e2ace393a8a",
+        "type": "mqtt out",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "topic": "binbot/leaderboard",
+        "qos": "0",
+        "retain": "true",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "ec04115348fb83a4",
+        "x": 1570,
+        "y": 1480,
+        "wires": []
+    },
+    {
+        "id": "c2db734defce37a8",
+        "type": "inject",
+        "z": "b7882dd88658c0f6",
+        "name": "Test Bottle Event 4",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{   \"school_id\": \"SCH_005\",   \"school_name\": \"class1\",   \"bin_id\": \"BIN_V\",   \"bin_name\": \"IDK\",   \"barcode\": \"5399999999999\" }",
+        "payloadType": "json",
+        "x": 610,
+        "y": 1260,
+        "wires": [
+            [
+                "02a0020df84fb4b2"
+            ]
+        ]
+    },
+    {
+        "id": "9fef45b111c92fa5",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 1",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1550,
+        "y": 1420,
+        "wires": []
+    },
+    {
+        "id": "88c28312a937d120",
+        "type": "mqtt in",
+        "z": "b7882dd88658c0f6",
+        "name": "class1_barcode",
+        "topic": "binbot/class1/barcode",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "ec04115348fb83a4",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 1500,
+        "wires": [
+            [
+                "078cf925d5dc3cc5",
+                "ff1a61497cfe3401",
+                "5220700743408b28"
+            ]
+        ]
+    },
+    {
+        "id": "078cf925d5dc3cc5",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Only classes",
+        "func": "let topic = msg.topic;\n\nif (!/^binbot\\/class\\d+\\/barcode/.test(topic)) {\n    return null;\n}\n\nlet parts = topic.split(\"/\");\nmsg.classId = parts[1];\nmsg.subtopic = parts[2];\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 1560,
+        "wires": [
+            [
+                "47f37b777ad7b650",
+                "644433e91cd2caf1",
+                "06bf08041b89d28f"
+            ]
+        ]
+    },
+    {
+        "id": "644433e91cd2caf1",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "class_data",
+        "func": "let barcode = msg.payload;\nif (typeof msg.payload === 'object' && msg.payload.barcode) {\n    barcode = msg.payload.barcode;\n}\n\nmsg.payload = JSON.stringify({\n    \"school_id\": msg.classId,\n    \"school_name\": msg.classId,\n    \"bin_id\": msg.classId + \"_bin\",\n    \"bin_name\": msg.classId + \" Bin\",\n    \"barcode\": String(barcode).trim()\n});\n\nreturn msg",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 630,
+        "y": 1520,
+        "wires": [
+            [
+                "b6d7ce65772afb50",
+                "238757eeef712780"
+            ]
+        ]
+    },
+    {
+        "id": "2d821a8e28c3b6e6",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Extract Data",
+        "func": "const p = msg.payload?.facts?.product || {};\nconst priceData = msg.payload?.price?.items || [];\nconst reTurnApi = msg.payload?.returnData || {};\n\nfunction getMl(quantity) {\n    if (!quantity) return null;\n    const volMatch = quantity.toLowerCase().match(/(\\d[\\d.]*)\\s*(ml|l)/);\n    if (!volMatch) return null;\n    const value = parseFloat(volMatch[1]);\n    return volMatch[2] === 'l' ? value * 1000 : value;\n}\n\nconst ml = getMl(p.quantity);\nlet eligibilityStatus = null;\n\nif (p.product_name || msg.barcode || p.code) {\n    const isEligible = reTurnApi?.is_eligible === true\n        || reTurnApi?.barcodeValid === true\n        || (reTurnApi?.is_eligible !== false && reTurnApi?.barcodeValid !== false && ml !== null);\n    eligibilityStatus = isEligible ? \"YES\" : \"NO\";\n}\n\nfunction calculateDeposit(status, volume) {\n    if (status !== \"YES\" || !volume) return null;\n    if (volume >= 150 && volume <= 500) return 0.15;\n    if (volume > 500 && volume <= 3000) return 0.25;\n    return null;\n}\n\nfunction getAvgPrice(items) {\n    const prices = (items || []).filter(function (i) { return typeof i.price === 'number'; });\n    if (!prices.length) return null;\n    return (prices.reduce(function (sum, i) { return sum + i.price; }, 0) / prices.length).toFixed(2);\n}\n\nmsg.payload = [[\n    new Date().toLocaleString('en-IE'),\n    msg.barcode ?? p.code ?? null,\n    p.brands ?? null,\n    p.product_name_ro ?? p.product_name ?? null,\n    msg.scannedPrice ?? getAvgPrice(priceData) ?? null,\n    eligibilityStatus,\n    calculateDeposit(eligibilityStatus, ml),\n    p.ecoscore_grade?.toUpperCase() ?? null,\n    p.packaging_shapes_tags?.[0]?.replace('en:', '') ?? null,\n    p.packaging_materials_tags?.[0]?.replace('en:', '') ?? null,\n    p.quantity ?? null\n]];\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 875,
+        "y": 1783,
+        "wires": [
+            [
+                "d0a90ae557236063"
+            ]
+        ]
+    },
+    {
+        "id": "47f37b777ad7b650",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "API Calls",
+        "func": "const barcode = msg.payload.code || msg.payload;\nmsg.barcode = barcode;\nmsg.scannedPrice = msg.payload.price || null; // preserve incoming price\n\nfunction getJSON(url) {\n    return new Promise(function (resolve) {\n        https.get(url, function (res) {\n            var data = '';\n            res.on('data', function (chunk) { data += chunk; });\n            res.on('end', function () {\n                try { resolve(JSON.parse(data)); }\n                catch (e) { resolve({}); }\n            });\n        }).on('error', function () { resolve({}); });\n    });\n}\n\n(async function () {\n    var results = await Promise.all([\n        getJSON('https://world.openfoodfacts.org/api/v2/product/' + barcode),\n        getJSON('https://prices.openfoodfacts.org/api/v1/prices?product_code=' + barcode),\n        getJSON('https://re-turn.shanehastings.ie/api/?barcode_number=' + barcode)\n    ]);\n\n    msg.payload = {\n        facts: results[0],\n        price: results[1],\n        returnData: results[2]\n    };\n\n    node.send(msg);\n})();\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "https",
+                "module": "https"
+            }
+        ],
+        "x": 720,
+        "y": 1760,
+        "wires": [
+            [
+                "2d821a8e28c3b6e6"
+            ]
+        ]
+    },
+    {
+        "id": "bb76e7cb8084a2b6",
+        "type": "mqtt in",
+        "z": "b7882dd88658c0f6",
+        "name": "class3_barcode",
+        "topic": "binbot/class3/barcode",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "ec04115348fb83a4",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 1600,
+        "wires": [
+            [
+                "078cf925d5dc3cc5"
+            ]
+        ]
+    },
+    {
+        "id": "30e6ef71ee2dbb5d",
+        "type": "mqtt in",
+        "z": "b7882dd88658c0f6",
+        "name": "class2_barcode",
+        "topic": "binbot/class2/barcode",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "ec04115348fb83a4",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 1560,
+        "wires": [
+            [
+                "078cf925d5dc3cc5"
+            ]
+        ]
+    },
+    {
+        "id": "666db0c8b6381e55",
+        "type": "mqtt in",
+        "z": "b7882dd88658c0f6",
+        "name": "class4_barcode",
+        "topic": "binbot/class4/barcode",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "ec04115348fb83a4",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 140,
+        "y": 1640,
+        "wires": [
+            [
+                "078cf925d5dc3cc5"
+            ]
+        ]
+    },
+    {
+        "id": "61c2c79ee4694335",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 4",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1390,
+        "y": 1360,
+        "wires": []
+    },
+    {
+        "id": "ff1a61497cfe3401",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 420,
+        "y": 1500,
+        "wires": []
+    },
+    {
+        "id": "7a4519fc36de36d0",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 2",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1190,
+        "y": 1120,
+        "wires": []
+    },
+    {
+        "id": "b6d7ce65772afb50",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 3",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 830,
+        "y": 1540,
+        "wires": []
+    },
+    {
+        "id": "06bf08041b89d28f",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 5",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 650,
+        "y": 1600,
+        "wires": []
+    },
+    {
+        "id": "45bf9c0097d68603",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 6",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1770,
+        "y": 1380,
+        "wires": []
+    },
+    {
+        "id": "238757eeef712780",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "API Calls",
+        "func": "let eventData = msg.payload;\n\nif (typeof eventData === 'string') {\n    eventData = JSON.parse(eventData);\n}\n\nconst barcode = eventData?.barcode;\n\nif (!barcode) {\n    return;\n}\n\nfunction getJSON(url) {\n    return new Promise((resolve) => {\n        https.get(url, (res) => {\n            let data = '';\n            res.on('data', (chunk) => { data += chunk; });\n            res.on('end', () => {\n                try { \n                    resolve(JSON.parse(data)); \n                } catch (e) { \n                    resolve({}); \n                }\n            });\n        }).on('error', (err) => {\n            resolve({});\n        });\n    });\n}\n\n(async () => {\n    try {\n        const [foodData, priceData, returnData] = await Promise.all([\n            getJSON('https://world.openfoodfacts.org/api/v2/product/' + barcode),\n            getJSON('https://prices.openfoodfacts.org/api/v1/prices?product_code=' + barcode),\n            getJSON('https://re-turn.shanehastings.ie/api/?barcode_number=' + barcode)\n        ]);\n\n        const isPartOfScheme = !!(\n            returnData?.barcodeValid === true ||\n            returnData?.eanValid === true ||\n            returnData?.valid === true ||\n            returnData?.is_valid === true ||\n            returnData?.success === true ||\n            returnData?.exists === true ||\n            returnData?.status === 200 ||\n            returnData?.barcode ||\n            (returnData?.message && returnData.message.includes(\"part of\")) ||\n            (returnData?.htmlMessage && returnData.htmlMessage.includes(\"part of\")) ||\n            returnData?.deposit_value ||\n            returnData?.depositValue ||\n            (returnData?.bottle && returnData.bottle.deposit)\n        );\n\n        if (!isPartOfScheme) {\n            return;\n        }\n\n        let depositValue = 0.15;\n        if (returnData?.htmlMessage?.includes(\"25c\")) {\n            depositValue = 0.25;\n        } else if (returnData?.deposit_value) {\n            depositValue = parseFloat(returnData.deposit_value);\n        } else if (returnData?.depositValue) {\n            depositValue = parseFloat(returnData.depositValue);\n        }\n\n        const product = foodData?.product || {};\n        let productName = product.product_name || product.product_name_ro || \"\";\n        let containerType = product.packaging_shapes_tags?.[0]?.replace('en:', '') || \"\";\n        let sizeMl = null;\n\n        if (product.quantity) {\n            const match = product.quantity.toLowerCase().match(/(\\d[\\d.]*)\\s*(ml|l)/);\n            if (match) {\n                sizeMl = match[2] === 'l' ? parseFloat(match[1]) * 1000 : parseFloat(match[1]);\n            }\n        }\n\n        const enrichedEvent = {\n            school_id: eventData.school_id,\n            school_name: eventData.school_name,\n            bin_id: eventData.bin_id,\n            bin_name: eventData.bin_name,\n            barcode: barcode,\n            item_name: productName,\n            container_type: containerType,\n            size_ml: sizeMl,\n            deposit_value: depositValue,\n            count: 1,\n            timestamp: new Date().toISOString(),\n            county: eventData.county || \"Unknown\"\n        };\n\n        msg.payload = enrichedEvent;\n        node.send(msg);\n\n    } catch (error) {\n        // silent fail\n    }\n})();\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "https",
+                "module": "https"
+            }
+        ],
+        "x": 820,
+        "y": 1440,
+        "wires": [
+            [
+                "a67c9aaeb4ccac24"
+            ]
+        ]
+    },
+    {
+        "id": "6b8944e5f67a73ef",
+        "type": "GSheet",
+        "z": "b7882dd88658c0f6",
+        "creds": "bfdcfcbd7bc6c5c2",
+        "method": "append",
+        "action": "",
+        "sheet": "1cR-bpzH2dEq0DvDItZUYbnmqOfSZwUTtHVDiF8iykas",
+        "cells": "Sheet1!A2",
+        "flatten": false,
+        "name": "",
+        "x": 1750,
+        "y": 1300,
+        "wires": [
+            [
+                "1762bb876894a28c"
+            ]
+        ]
+    },
+    {
+        "id": "d0a90ae557236063",
+        "type": "GSheet",
+        "z": "b7882dd88658c0f6",
+        "creds": "2c6c2305647187d3",
+        "method": "append",
+        "action": "",
+        "sheet": "1s0nrHz2Q4q2wHNGq1Sb8P795-43MWVRb8RW824muK54",
+        "cells": "'Products'!A:F",
+        "flatten": false,
+        "name": "Products",
+        "x": 1055,
+        "y": 1783,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "1762bb876894a28c",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 10",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2010,
+        "y": 1300,
+        "wires": []
+    },
+    {
+        "id": "705a8f86ced75693",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 12",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "jsonata",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 1790,
+        "y": 620,
+        "wires": []
+    },
+    {
+        "id": "afb1656fd9b1e53e",
+        "type": "switch",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "property": "payload.classId",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "class1",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "class2",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 890,
+        "y": 720,
+        "wires": [
+            [
+                "b3d7ed9468907e03",
+                "bcbd694b1a20c1c3"
+            ],
+            [
+                "03ca5149140433d6",
+                "217c5b7730247a85",
+                "b3d7ed9468907e03"
+            ]
+        ]
+    },
+    {
+        "id": "b3d7ed9468907e03",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Fullness Alerts",
+        "func": "if (msg.payload.fullness && msg.payload.fullness > .9) {\n    let fullnessPercent = msg.payload.fullness*100\n    msg.announcement = \"I'M \" + fullnessPercent + \"% FULLLLL RELEASE MEEEEEEE!!!! (at: \" + msg.payload.classId + \")\";\n\n    msg.url = \"https://oauth2.googleapis.com/token\";\n    msg.method = \"POST\";\n    msg.headers = { \"Content-Type\": \"application/x-www-form-urlencoded\" };\n    \n    const clientId = \"PUT GOOGLE APP ID HERE\";\n    const clientSecret = \"PUT APP SECRET HERE\";\n    const refreshToken = \"PUT REFRESH TOKEN FROM OAuth 2.0 Playground HERE\"; \n\n    msg.payload = `client_id=${clientId}&client_secret=${clientSecret}&refresh_token=${refreshToken}&grant_type=refresh_token`;\n    \n    return msg;\n}\nreturn null;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1100,
+        "y": 720,
+        "wires": [
+            [
+                "6eb6364d79f63e1f",
+                "705a8f86ced75693"
+            ]
+        ]
+    },
+    {
+        "id": "6eb6364d79f63e1f",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1290,
+        "y": 720,
+        "wires": [
+            [
+                "705a8f86ced75693",
+                "dfdb22166a32d17e"
+            ]
+        ]
+    },
+    {
+        "id": "62a581d20842493e",
+        "type": "inject",
+        "z": "b7882dd88658c0f6",
+        "name": "class1 fullness 0.95",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"classId\": \"class1\", \"fullness\": 0.95}",
+        "payloadType": "json",
+        "x": 610,
+        "y": 880,
+        "wires": [
+            [
+                "afb1656fd9b1e53e"
+            ]
+        ]
+    },
+    {
+        "id": "85d04f715bbf3258",
+        "type": "http in",
+        "z": "b7882dd88658c0f6",
+        "name": "http in",
+        "url": "/oauth-callback",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 530,
+        "y": 240,
+        "wires": [
+            [
+                "671722c49bc72d88"
+            ]
+        ]
+    },
+    {
+        "id": "671722c49bc72d88",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "1. Get Tokens",
+        "func": "if (!msg.payload.code) return null;\n\nmsg.url = \"https://oauth2.googleapis.com/token\";\nmsg.method = \"POST\";\nmsg.headers = { \"Content-Type\": \"application/x-www-form-urlencoded\" };\n\nconst clientId = \"PUT GOOGLE APP ID HERE\";\nconst clientSecret = \"PUT APP SECRET HERE\";\nconst redirectUri = \"PUT NGORK URL/oauth-callback HERE\";\n\nmsg.payload = `code=${msg.payload.code}&client_id=${clientId}&client_secret=${clientSecret}&redirect_uri=${redirectUri}&grant_type=authorization_code`;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 760,
+        "y": 240,
+        "wires": [
+            [
+                "aee2b4680830fe0a"
+            ]
+        ]
+    },
+    {
+        "id": "aee2b4680830fe0a",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "Fetch Token",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 960,
+        "y": 240,
+        "wires": [
+            [
+                "c906ed77c8cce2ff"
+            ]
+        ]
+    },
+    {
+        "id": "c906ed77c8cce2ff",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "2. Request Courses",
+        "func": "const token = msg.payload.access_token;\nif(!token) return null;\n\nmsg.teacherToken = token; // save token for the next node\nmsg.url = \"https://classroom.googleapis.com/v1/courses?courseStates=ACTIVE\";\nmsg.method = \"GET\";\nmsg.headers = { \"Authorization\": \"Bearer \" + token };\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1160,
+        "y": 240,
+        "wires": [
+            [
+                "1bac9b5ef970f062"
+            ]
+        ]
+    },
+    {
+        "id": "1bac9b5ef970f062",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "Get Courses",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1360,
+        "y": 240,
+        "wires": [
+            [
+                "d8195a9536a813a0"
+            ]
+        ]
+    },
+    {
+        "id": "d8195a9536a813a0",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "3. Build Dropdown HTML",
+        "func": "const courses = msg.payload.courses || [];\nconst teacherToken = msg.teacherToken;\n\nlet optionsHtml = \"\";\ncourses.forEach(c => {\n    optionsHtml += `<option value=\"${c.id}\">${c.name}</option>\\n`;\n});\n\nmsg.payload = `\n<html>\n<head><meta charset=\"utf-8\"></head>\n<body style=\"font-family: Arial; text-align: center; margin-top: 50px;\">\n    <h1>Welcome to BinBot</h1>\n    <p>Select the class you want BinBot to join:</p>\n    <form action=\"/invite-bot\" method=\"POST\">\n        <select name=\"courseId\" style=\"padding: 10px; font-size: 16px; margin-bottom: 20px;\">\n            ${optionsHtml}\n        </select><br>\n        <input type=\"hidden\" name=\"teacherToken\" value=\"${teacherToken}\">\n        <button type=\"submit\" style=\"padding: 10px 20px; font-size: 16px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;\">Invite BinBot</button>\n    </form>\n</body>\n</html>\n`;\n\nmsg.headers = { \"Content-Type\": \"text/html\" };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1580,
+        "y": 240,
+        "wires": [
+            [
+                "148193bdca4126eb"
+            ]
+        ]
+    },
+    {
+        "id": "148193bdca4126eb",
+        "type": "http response",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 1780,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "74a09d45a5f3b68d",
+        "type": "http in",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "url": "/invite-bot",
+        "method": "post",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 560,
+        "y": 320,
+        "wires": [
+            [
+                "6abe6a2a1148e0df"
+            ]
+        ]
+    },
+    {
+        "id": "6abe6a2a1148e0df",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "4. Send Invite",
+        "func": "const courseId = msg.payload.courseId;\nconst token = msg.payload.teacherToken;\n\nmsg.url = \"https://classroom.googleapis.com/v1/invitations\";\nmsg.method = \"POST\";\nmsg.headers = { \n    \"Authorization\": \"Bearer \" + token,\n    \"Content-Type\": \"application/json\"\n};\n\nmsg.payload = {\n    \"userId\": \"binbotsetu@gmail.com\",\n    \"courseId\": courseId,\n    \"role\": \"TEACHER\"\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 750,
+        "y": 320,
+        "wires": [
+            [
+                "ef55c2075b3ce5d9"
+            ]
+        ]
+    },
+    {
+        "id": "ef55c2075b3ce5d9",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "Post Invite",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 940,
+        "y": 320,
+        "wires": [
+            [
+                "bc0f8e3fb0a0a51c",
+                "c9fb4a122550ee25"
+            ]
+        ]
+    },
+    {
+        "id": "6a72381e21b3fe2a",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "5. Get BinBot Token",
+        "func": "msg.invitationId = msg.payload.id || msg.invitationId; flow.set(\"savedInviteId\", msg.payload.id);\n\nmsg.url = \"https://oauth2.googleapis.com/token\";\nmsg.method = \"POST\";\nmsg.headers = { \"Content-Type\": \"application/x-www-form-urlencoded\" };\n\nconst clientId = \"PUT GOOGLE APP ID HERE\";\nconst clientSecret = \"PUT APP SECRET HERE\";\nconst binbotRefreshToken = \"PUT REFRESH TOKEN FROM OAuth 2.0 Playground HERE\"; \n\nmsg.payload = `client_id=${clientId}&client_secret=${clientSecret}&refresh_token=${binbotRefreshToken}&grant_type=refresh_token`;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1170,
+        "y": 320,
+        "wires": [
+            [
+                "6fd045a715f79954",
+                "bc0f8e3fb0a0a51c"
+            ]
+        ]
+    },
+    {
+        "id": "6fd045a715f79954",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "Fetch Bot Token",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1370,
+        "y": 320,
+        "wires": [
+            [
+                "59d1830ea5c41a28",
+                "bc0f8e3fb0a0a51c"
+            ]
+        ]
+    },
+    {
+        "id": "59d1830ea5c41a28",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "6. Accept Invite",
+        "func": "const binbotAccessToken = msg.payload.access_token;\n\n// grab the ID we saved into memory\nconst theInviteId = flow.get(\"savedInviteId\");\n\n// accepting the specific invite ID\nmsg.url = `https://classroom.googleapis.com/v1/invitations/${theInviteId}:accept`;\nmsg.method = \"POST\";\n\nmsg.headers = {\n    \"Authorization\": \"Bearer \" + binbotAccessToken,\n    \"Content-Type\": \"application/json\"\n};\n\n// google requires an empty payload for this specific POST request\nmsg.payload = {};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1550,
+        "y": 320,
+        "wires": [
+            [
+                "da2abc1c5111f4b2",
+                "bc0f8e3fb0a0a51c"
+            ]
+        ]
+    },
+    {
+        "id": "da2abc1c5111f4b2",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "Post Accept",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1740,
+        "y": 320,
+        "wires": [
+            [
+                "0dd4249b82f25c06",
+                "bc0f8e3fb0a0a51c"
+            ]
+        ]
+    },
+    {
+        "id": "0dd4249b82f25c06",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "7. Final Success Page",
+        "func": "msg.payload = `\n<html>\n<head><meta charset=\"utf-8\"></head>\n<body style=\"font-family: Arial; text-align: center; margin-top: 50px;\">\n    <h1>BinBot is Ready!</h1>\n    <h2>The bot has successfully joined your classroom.</h2>\n    <p>It will now automatically post alerts when the sensor triggers.</p>\n</body>\n</html>\n`;\nmsg.headers = { \"Content-Type\": \"text/html\" };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1930,
+        "y": 320,
+        "wires": [
+            [
+                "475470139d306396",
+                "bc0f8e3fb0a0a51c"
+            ]
+        ]
+    },
+    {
+        "id": "475470139d306396",
+        "type": "http response",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 2010,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "bc0f8e3fb0a0a51c",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 13",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 1840,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "dfdb22166a32d17e",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Prep Course Request",
+        "func": "const accessToken = msg.payload.access_token;\nif(!accessToken) return null;\nmsg.accessToken = accessToken; // save token and announcement \n\nmsg.url = \"https://classroom.googleapis.com/v1/courses?courseStates=ACTIVE\";\nmsg.method = \"GET\";\nmsg.headers = { \"Authorization\": \"Bearer \" + accessToken }; // ask google for all active courses\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1500,
+        "y": 720,
+        "wires": [
+            [
+                "23561a47d1074aee",
+                "705a8f86ced75693"
+            ]
+        ]
+    },
+    {
+        "id": "23561a47d1074aee",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "Fetch Courses",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1760,
+        "y": 720,
+        "wires": [
+            [
+                "4232eec7f9125f1a",
+                "705a8f86ced75693"
+            ]
+        ]
+    },
+    {
+        "id": "4232eec7f9125f1a",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Post to All Classes",
+        "func": "const courses = msg.payload.courses;\nif (!courses || courses.length === 0) return null;\n\nlet outgoingMessages = [];\ncourses.forEach(course => { // loop through every class BinBot is in\n    let postMsg = {};\n    postMsg.url = `https://classroom.googleapis.com/v1/courses/${course.id}/announcements`;\n    postMsg.method = \"POST\";\n    postMsg.headers = {\n        \"Authorization\": \"Bearer \" + msg.accessToken,\n        \"Content-Type\": \"application/json\"\n    };\n    postMsg.payload = {\n        \"text\": msg.announcement\n    };\n    outgoingMessages.push(postMsg);\n});\nreturn [outgoingMessages];",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1990,
+        "y": 720,
+        "wires": [
+            [
+                "80e5cb88f529dcdd",
+                "705a8f86ced75693"
+            ]
+        ]
+    },
+    {
+        "id": "80e5cb88f529dcdd",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "Send Announcements",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1980,
+        "y": 800,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "e2da402760e6935a",
+        "type": "http in",
+        "z": "b7882dd88658c0f6",
+        "name": "GET /alerts",
+        "url": "/alerts",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 550,
+        "y": 480,
+        "wires": [
+            [
+                "d36c711471798458"
+            ]
+        ]
+    },
+    {
+        "id": "d36c711471798458",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Signup Page HTML",
+        "func": "msg.payload = `\n<html>\n<head><meta charset=\"utf-8\"></head>\n<body style=\"font-family: Arial; text-align: center; margin-top: 50px;\">\n    <h1>BinBot Email Alerts</h1>\n    <p>Select your classroom and enter your email to receive full-bin alerts.</p>\n    <form action=\"/subscribe\" method=\"POST\">\n        <select name=\"classId\" required style=\"padding: 10px; font-size: 16px; margin-bottom: 20px; width: 250px;\">\n            <option value=\"\" disabled selected>Select a Classroom...</option>\n            <option value=\"class1\">Class 1</option>\n            <option value=\"class2\">Class 2</option>\n            <option value=\"class3\">Class 3</option>\n            <option value=\"class4\">Class 4</option>\n        </select><br>\n        \n        <input type=\"email\" name=\"email\" placeholder=\"teacher@school.edu\" required style=\"padding: 10px; font-size: 16px; margin-bottom: 20px; width: 250px;\"><br>\n        \n        <button type=\"submit\" style=\"padding: 10px 20px; font-size: 16px; background-color: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer;\">Subscribe</button>\n    </form>\n</body>\n</html>\n`;\nmsg.headers = { \"Content-Type\": \"text/html\" };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 770,
+        "y": 480,
+        "wires": [
+            [
+                "1352c76358056c4e"
+            ]
+        ]
+    },
+    {
+        "id": "1352c76358056c4e",
+        "type": "http response",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 950,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "a7d4ed8d5cce28bb",
+        "type": "http in",
+        "z": "b7882dd88658c0f6",
+        "name": "POST /subscribe",
+        "url": "/subscribe",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 560,
+        "y": 540,
+        "wires": [
+            [
+                "0404f3ad4ca4cbbc"
+            ]
+        ]
+    },
+    {
+        "id": "0404f3ad4ca4cbbc",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Save Email",
+        "func": "const newEmail = msg.payload.email;\nconst targetClass = msg.payload.classId;\n\nif (!newEmail || !targetClass) return null;\n\nlet subs = global.get(\"binbotSubscriptions\") || {};\n\n// create array if not there\nif (!subs[targetClass]) {\n    subs[targetClass] = [];\n}\n\n// add the new email to that class array\nif (!subs[targetClass].includes(newEmail)) {\n    subs[targetClass].push(newEmail);\n    global.set(\"binbotSubscriptions\", subs);\n}\n\nmsg.payload = `\n<html>\n<head><meta charset=\"utf-8\"></head>\n<body style=\"font-family: Arial; text-align: center; margin-top: 50px;\">\n    <h1>Success!</h1>\n    <p>${newEmail} has been subscribed to alerts for <strong>${targetClass}</strong>.</p>\n</body>\n</html>\n`;\nmsg.headers = { \"Content-Type\": \"text/html\" };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 760,
+        "y": 540,
+        "wires": [
+            [
+                "3f6b463651eb234c"
+            ]
+        ]
+    },
+    {
+        "id": "3f6b463651eb234c",
+        "type": "http response",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 950,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "bcbd694b1a20c1c3",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Format Outgoing Email",
+        "func": "if (msg.payload.fullness && msg.payload.fullness > 0.9) {\n\n    const binClass = msg.payload.classId || \"Unknown Class\";\n    let allSubscriptions = global.get(\"binbotSubscriptions\") || {};\n\n    // ONLY the emails for this specific class\n    let classEmails = allSubscriptions[binClass] || [];\n\n    const resendApiKey = \"PUT RESEND API HERE\";\n\n    msg.url = \"https://api.resend.com/emails\";\n    msg.method = \"POST\";\n\n    msg.headers = {\n        \"Authorization\": \"Bearer \" + resendApiKey,\n        \"Content-Type\": \"application/json\"\n    };\n\n    const fullnessPercent = (msg.payload.fullness * 100).toFixed(0) + \"%\";\n\n    msg.payload = {\n        \"from\": \"BinBot Alerts <onboarding@resend.dev>\",\n        \"to\": classEmails,\n        \"subject\": `🚨 BinBot Alert: ${binClass} Bin is FULL!`,\n        \"html\": `\n            <div style=\"font-family: Arial, sans-serif; text-align: center; padding: 20px;\">\n                <h1 style=\"color: #d9534f;\">🚨 Bin is Full! 🚨</h1>\n                <h2>Action Required in ${binClass}</h2>\n                <p style=\"font-size: 18px;\">The bin is currently at <strong>${fullnessPercent}</strong> capacity.</p>\n                <hr>\n                <p style=\"color: #777;\">Please empty the bin at your earliest convenience.</p>\n            </div>\n        `\n    };\n\n    return msg;\n}\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1050,
+        "y": 620,
+        "wires": [
+            [
+                "16140123ea24fd58",
+                "217c5b7730247a85"
+            ]
+        ]
+    },
+    {
+        "id": "3f7c5b683d5dd9cd",
+        "type": "mqtt in",
+        "z": "b7882dd88658c0f6",
+        "name": "class1_full",
+        "topic": "binbot/class1/full",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "acb61668e9aa1f1a",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 540,
+        "y": 660,
+        "wires": [
+            [
+                "ec72612f4b1f1ddb"
+            ]
+        ]
+    },
+    {
+        "id": "aec69b14e396bd6a",
+        "type": "mqtt in",
+        "z": "b7882dd88658c0f6",
+        "name": "class3_full",
+        "topic": "binbot/class3/full",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "acb61668e9aa1f1a",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 540,
+        "y": 760,
+        "wires": [
+            [
+                "366127e5d2eab02b"
+            ]
+        ]
+    },
+    {
+        "id": "673b89b157058ae2",
+        "type": "mqtt in",
+        "z": "b7882dd88658c0f6",
+        "name": "class2_full",
+        "topic": "binbot/class2/full",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "acb61668e9aa1f1a",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 540,
+        "y": 720,
+        "wires": [
+            [
+                "3cf83485a7d9b998"
+            ]
+        ]
+    },
+    {
+        "id": "7de646efdee0995d",
+        "type": "mqtt in",
+        "z": "b7882dd88658c0f6",
+        "name": "class4_full",
+        "topic": "binbot/class4/full",
+        "qos": "1",
+        "datatype": "auto-detect",
+        "broker": "acb61668e9aa1f1a",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 540,
+        "y": 800,
+        "wires": [
+            [
+                "dd89425cd401f865"
+            ]
+        ]
+    },
+    {
+        "id": "217c5b7730247a85",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 14",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1460,
+        "y": 620,
+        "wires": []
+    },
+    {
+        "id": "16140123ea24fd58",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1270,
+        "y": 620,
+        "wires": [
+            [
+                "217c5b7730247a85"
+            ]
+        ]
+    },
+    {
+        "id": "ec72612f4b1f1ddb",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Tag Data",
+        "func": "msg.payload = {\n    \"classId\": \"class1\",\n    \"fullness\": parseFloat(msg.payload) \n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 660,
+        "wires": [
+            [
+                "d2b57849f9932d68",
+                "afb1656fd9b1e53e"
+            ]
+        ]
+    },
+    {
+        "id": "3cf83485a7d9b998",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Tag Data",
+        "func": "msg.payload = {\n    \"classId\": \"class2\",\n    \"fullness\": parseFloat(msg.payload)\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 720,
+        "wires": [
+            [
+                "afb1656fd9b1e53e"
+            ]
+        ]
+    },
+    {
+        "id": "366127e5d2eab02b",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Tag Data",
+        "func": "msg.payload = {\n    \"classId\": \"class4\",\n    \"fullness\": parseFloat(msg.payload)\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 760,
+        "wires": [
+            [
+                "afb1656fd9b1e53e"
+            ]
+        ]
+    },
+    {
+        "id": "dd89425cd401f865",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Tag Data",
+        "func": "msg.payload = {\n    \"classId\": \"class3\",\n    \"fullness\": parseFloat(msg.payload)\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 800,
+        "wires": [
+            [
+                "afb1656fd9b1e53e"
+            ]
+        ]
+    },
+    {
+        "id": "03ca5149140433d6",
+        "type": "function",
+        "z": "b7882dd88658c0f6",
+        "name": "Format Outgoing Email",
+        "func": "if (msg.payload.fullness && msg.payload.fullness > 0.9) {\n\n    const binClass = msg.payload.classId || \"Unknown Class\";\n    let allSubscriptions = global.get(\"binbotSubscriptions\") || {};\n\n    // ONLY the emails for this specific class\n    let classEmails = allSubscriptions[binClass] || [];\n\n    const resendApiKey = \"PUT RESEND API HERE\";\n\n    msg.url = \"https://api.resend.com/emails\";\n    msg.method = \"POST\";\n\n    msg.headers = {\n        \"Authorization\": \"Bearer \" + resendApiKey,\n        \"Content-Type\": \"application/json\"\n    };\n\n    const fullnessPercent = (msg.payload.fullness * 100).toFixed(0) + \"%\";\n\n    msg.payload = {\n        \"from\": \"BinBot Alerts <onboarding@resend.dev>\",\n        \"to\": classEmails,\n        \"subject\": `🚨 BinBot Alert: ${binClass} Bin is FULL!`,\n        \"html\": `\n            <div style=\"font-family: Arial, sans-serif; text-align: center; padding: 20px;\">\n                <h1 style=\"color: #d9534f;\">🚨 Bin is Full! 🚨</h1>\n                <h2>Action Required in ${binClass}</h2>\n                <p style=\"font-size: 18px;\">The bin is currently at <strong>${fullnessPercent}</strong> capacity.</p>\n                <hr>\n                <p style=\"color: #777;\">Please empty the bin at your earliest convenience.</p>\n            </div>\n        `\n    };\n\n    return msg;\n}\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1090,
+        "y": 780,
+        "wires": [
+            [
+                "8ba306c0d7fa68e1"
+            ]
+        ]
+    },
+    {
+        "id": "8ba306c0d7fa68e1",
+        "type": "http request",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 1310,
+        "y": 780,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "a8ac1f1c82e6f38c",
+        "type": "inject",
+        "z": "b7882dd88658c0f6",
+        "name": "class2 fullness 0.95",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"classId\": \"class2\", \"fullness\": 0.95}",
+        "payloadType": "json",
+        "x": 610,
+        "y": 960,
+        "wires": [
+            [
+                "afb1656fd9b1e53e",
+                "217c5b7730247a85"
+            ]
+        ]
+    },
+    {
+        "id": "d2b57849f9932d68",
+        "type": "debug",
+        "z": "b7882dd88658c0f6",
+        "name": "debug 15",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 880,
+        "y": 800,
+        "wires": []
+    },
+    {
+        "id": "c9fb4a122550ee25",
+        "type": "delay",
+        "z": "b7882dd88658c0f6",
+        "name": "",
+        "pauseType": "delay",
+        "timeout": "2",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 1040,
+        "y": 400,
+        "wires": [
+            [
+                "6a72381e21b3fe2a"
+            ]
+        ]
+    },
+    {
+        "id": "ec04115348fb83a4",
+        "type": "mqtt-broker",
+        "name": "MQTT",
+        "broker": "mqtt.beebotte.com",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "bfdcfcbd7bc6c5c2",
+        "type": "gauth",
+        "name": "Unknown"
+    },
+    {
+        "id": "2c6c2305647187d3",
+        "type": "gauth",
+        "name": "binbot-sheets@binbot-490722.iam.gserviceaccount.com"
+    },
+    {
+        "id": "acb61668e9aa1f1a",
+        "type": "mqtt-broker",
+        "name": "MQTT",
+        "broker": "mqtt.beebotte.com",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "88c9dc0dbc2df453",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-contrib-google-sheets": "1.1.2"
+        }
+    }
+]
