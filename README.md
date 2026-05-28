@@ -19,4 +19,4 @@ The imported flow should look like this:
 
 ### Microbit Code
 
-Code for microbits can be accessed in [`microbit_code.md`](./microbit_code.md). The file contains two links, one for the master board and one for the slave board.
+Code for microbits can be accessed in [`microbit_code.md`](./Microbit_Code_Links.md). The file contains two links, one for the master board and one for the slave board.
