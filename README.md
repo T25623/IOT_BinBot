@@ -12,3 +12,11 @@ The Node-RED flow configuration is stored in [`final_flow.json`](./final_flow.js
 The flow will be loaded into your Node-RED workspace and is ready to use.
 
 For local setup instructions, see the [Node-RED Getting Started guide](https://nodered.org/docs/getting-started/local) for Docker and local installation options.
+
+The imported flow should look like this:
+
+![Node-RED Flow](./nodered_flow.png)
+
+### Microbit Code
+
+Code for microbits can be accessed in [`microbit_code.md`](./microbit_code.md). The file contains two links, one for the master board and one for the slave board.
